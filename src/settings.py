@@ -7,3 +7,4 @@ class Settings(BaseSettings):
     neo4j_user: str = 'neo4j'
     neo4j_password: str = 'password'
     redis_uri: str = 'redis://localhost:6379'
+    log_level: str = 'INFO'
