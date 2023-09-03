@@ -1,14 +1,13 @@
 import asyncio
 import datetime
-import os
 from urllib.parse import urlparse
 
+import redis.asyncio as aioredis
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from neo4j import AsyncGraphDatabase, AsyncManagedTransaction, AsyncDriver, Record
-from redis.asyncio import Redis
 
+from settings import Settings
 from weighted_queue import WeightedQueue
-
 
 INPUT_TOPIC = 'urls_unprioritized'
 OUTPUT_STREAM_NAME = 'domain_queue:{}'
@@ -36,7 +35,7 @@ async def add_to_weighted_queue(neo4j_driver: AsyncDriver, url: str, producer: A
         await producer.send(INPUT_TOPIC, url.encode('utf-8'), timestamp_ms=now())
 
 
-async def send_to_stream(redis: Redis):
+async def send_to_stream(redis: aioredis.Redis):
     pipe = redis.pipeline()
     urls = [WEIGHTED_QUEUE.pop() for _ in range(BATCH_SIZE)]
     print(f'urls: {urls}')
@@ -48,13 +47,11 @@ async def send_to_stream(redis: Redis):
 
 
 async def main():
-    kafka_uri = os.getenv('KAFKA_URI', 'localhost:9092')
-    consumer = AIOKafkaConsumer(INPUT_TOPIC, bootstrap_servers=kafka_uri)
-    producer = AIOKafkaProducer(bootstrap_servers=kafka_uri)
-    neo4j_uri = os.getenv('NEO4J_URI', 'bolt://localhost:7687')
-    neo4j_credentials = os.getenv('NEO4J_USER', 'neo4j'), os.getenv('NEO4J_PASSWORD', 'password')
-    neo4j_driver = AsyncGraphDatabase.driver(neo4j_uri, auth=neo4j_credentials)
-    redis = Redis(host=os.getenv("REDIS_HOST", "localhost"), port=os.getenv("REDIS_PORT", 6379))
+    settings = Settings()
+    consumer = AIOKafkaConsumer(INPUT_TOPIC, bootstrap_servers=settings.kafka_uri)
+    producer = AIOKafkaProducer(bootstrap_servers=settings.kafka_uri)
+    neo4j_driver = AsyncGraphDatabase.driver(settings.neo4j_uri, auth=(settings.neo4j_user, settings.neo4j_password))
+    redis = await aioredis.from_url(settings.redis_uri)
     print('Starting...')
     try:
         await asyncio.gather(*(consumer.start(), producer.start()))
