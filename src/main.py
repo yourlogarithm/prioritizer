@@ -57,7 +57,7 @@ async def main():
     producer = AIOKafkaProducer(bootstrap_servers=settings.kafka_uri)
     neo4j_driver = AsyncGraphDatabase.driver(settings.neo4j_uri, auth=(settings.neo4j_user, settings.neo4j_password))
     redis = await aioredis.from_url(settings.redis_uri)
-    logger = Logger(settings.log_level)
+    logger = Logger('prioritizer', settings.log_level)
     logger.info('Starting...')
     try:
         logger.info('Starting consumer/producer')
