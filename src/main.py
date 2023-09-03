@@ -5,7 +5,6 @@ from urllib.parse import urlparse
 
 import redis.asyncio as aioredis
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
-from kafka.structs import TopicPartition
 from neo4j import AsyncGraphDatabase, AsyncManagedTransaction, AsyncDriver, Record
 from common_utils import persistent_execution
 from common_utils.logger import Logger
@@ -31,7 +30,7 @@ async def get_rank(tx: AsyncManagedTransaction, url: str) -> Record | None:
 
 async def add_to_weighted_queue(neo4j_driver: AsyncDriver, url: str, producer: AIOKafkaProducer, logger: Logger):
     logger.debug(f'Adding {url} to weighted queue')
-    async with neo4j_driver.session(database='pages') as session:
+    async with neo4j_driver.session() as session:
         record = await session.execute_read(get_rank, url)
     if record is not None:
         logger.debug(f'Got rank {record[0]} for {url}')
@@ -53,22 +52,18 @@ async def send_to_stream(redis: aioredis.Redis):
 
 async def main():
     settings = Settings()
+    logger = Logger('prioritizer', settings.log_level)
     consumer = AIOKafkaConsumer(INPUT_TOPIC, bootstrap_servers=settings.kafka_uri)
     producer = AIOKafkaProducer(bootstrap_servers=settings.kafka_uri)
     neo4j_driver = AsyncGraphDatabase.driver(settings.neo4j_uri, auth=(settings.neo4j_user, settings.neo4j_password))
     redis = await aioredis.from_url(settings.redis_uri)
-    logger = Logger('prioritizer', settings.log_level)
     logger.info('Starting...')
     try:
         logger.info('Starting consumer/producer')
         start_kwargs = {'tries': 5, 'delay': 5, 'backoff': 5, 'logger_': logger}
-        await asyncio.gather(*(persistent_execution(consumer.start, **start_kwargs), persistent_execution(producer.start, **start_kwargs)))
+        await persistent_execution(consumer.start, **start_kwargs)
+        await persistent_execution(producer.start, **start_kwargs)
         logger.info('Started consumer/producer')
-        await asyncio.sleep(5)
-        logger.info(f"Assigned partitions: {[topic_partition.partition for topic_partition in consumer.assignment()]}")
-        topic_partition = TopicPartition(INPUT_TOPIC, 0)
-        position = await consumer.position(topic_partition)
-        logger.info(f"Current position for partition {topic_partition.partition}: {position}")
         async for msg in consumer:
             decoded = msg.value.decode('utf-8')
             logger.debug(f"Received {decoded} from {msg.topic}:{msg.partition}:{msg.offset}")
